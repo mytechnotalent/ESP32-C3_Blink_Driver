@@ -8,7 +8,7 @@
 An ESP32-C3 blink driver written entirely in RISC-V Assembler.
 
 # Install ESP Toolchain
-## NOTE: Be SURE to update your version in `build.bat` i.e. `esp-14.2.0_20241119`
+## NOTE: Be SURE to update your version in `build.bat` i.e. `esp-14.2.0_20241119`.
 [HERE](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/get-started/windows-setup.html)
 
 # Code
