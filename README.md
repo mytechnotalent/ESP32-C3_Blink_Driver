@@ -8,142 +8,256 @@
 An ESP32-C3 blink driver written entirely in RISC-V Assembler.
 
 # Install ESP Toolchain
-## NOTE: Be SURE to update your version in `build.bat` i.e. `esp-14.2.0_20241119`.
-[HERE](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/get-started/windows-setup.html)
+## Windows Installer
+[HERE](https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/get-started/windows-setup.html)
+## Linux and macOS Installer
+[HERE](https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/get-started/linux-macos-setup.html)
 
-# Code
-```assembler
+# startup Code
+```
 /*
- * FILE: main.s
+ * FILE: startup.s
  *
  * DESCRIPTION:
- * ESP32-C3 Bare-Metal GPIO8 Blink
- *
- * BRIEF:
- * Minimal bare‑metal LED blink on the ESP32-C3 using the direct
- * instructions to manipulate GPIO control registers. This bypasses
- * SDK abstractions and demonstrates register‑level control in assembler.
- * External crystal is 40 MHz; CPU runs at 80 MHz by default.
+ * Minimal reset/startup stub for ESP32-C3.
  *
  * AUTHOR: Kevin Thomas
- * CREATION DATE: October 24, 2025
- * UPDATE DATE: November 1, 2025
+ * CREATION DATE: November 14, 2025
+ * UPDATE DATE: November 14, 2025
  */
 
-/**
- * Memory addresses and constants.
- */
-.equ TIMG0_BASE,                0x6001F000
-.equ TIMG_WDTCONFIG0_REG,       TIMG0_BASE + 0x48
-.equ TIMG_WDTFEED_REG,          TIMG0_BASE + 0x60
-.equ TIMG_WDTWPROTECT_REG,      TIMG0_BASE + 0x64
-.equ RTC_CNTL_BASE,             0x60008000
-.equ RTC_CNTL_WDTCONFIG0_REG,   RTC_CNTL_BASE + 0x90
-.equ RTC_CNTL_WDT_FEED_REG,     RTC_CNTL_BASE + 0xA4
-.equ RTC_CNTL_WDTWPROTECT_REG,  RTC_CNTL_BASE + 0xA8
-.equ RTC_CNTL_SWD_CONF_REG,     RTC_CNTL_BASE + 0xAC
-.equ RTC_CNTL_SWD_WPROTECT_REG, RTC_CNTL_BASE + 0xB0
-.equ GPIO_BASE,                 0x60004000
-.equ GPIO_OUT_W1TS_REG,         GPIO_BASE + 0x08
-.equ GPIO_OUT_W1TC_REG,         GPIO_BASE + 0x0C
-.equ GPIO_ENABLE_W1TS_REG,      GPIO_BASE + 0x24
-.equ APP_ENTRY,                 0x42010000
+.include "inc/registers.inc"
 
 /**
- * Boot stub entry point.
+ * Initialize the .text.init section.
+ * The .text.init section contains init executable code.
  */
-.section .boot
-.align 2
-.global Reset_Boot
-.type Reset_Boot, %function
-Reset_Boot:
-  .space 8                                       # reserve 8 bytes for Direct Boot magic
-  lui   t0, %hi(_stack_top)                      # load stack top high half
-  addi  t0, t0, %lo(_stack_top)                  # add low half
-  addi  sp, t0, 0                                # set stack pointer
-  li    t1, 0x50d83aa1                           # TIMG0 WDT: unlock key value
-  lui   t2, %hi(TIMG_WDTWPROTECT_REG)            # TIMG0 WDT protect register high
-  addi  t2, t2, %lo(TIMG_WDTWPROTECT_REG)        # add low part
-  sw    t1, 0(t2)                                # write unlock key
-  lui   t2, %hi(TIMG_WDTCONFIG0_REG)             # TIMG0 WDT configuration register high
-  addi  t2, t2, %lo(TIMG_WDTCONFIG0_REG)         # add low part
-  lw    t3, 0(t2)                                # read current config
-  li    t4, 0xFFFFBFFF                           # mask to clear enable bit
-  and   t3, t3, t4                               # disable TIMG0 WDT
-  sw    t3, 0(t2)                                # write updated config
-  lw    t3, 0(t2)                                # re-read for modify
-  li    t4, 1<<22                                # set flashboot feed bit (keep ROM happy)
-  or    t3, t3, t4                               # OR flashboot bit into config
-  sw    t3, 0(t2)                                # write updated config
-  lui   t2, %hi(TIMG_WDTFEED_REG)                # TIMG0 WDT feed register high
-  addi  t2, t2, %lo(TIMG_WDTFEED_REG)            # add low part
-  li    t3, 1                                    # feed value
-  sw    t3, 0(t2)                                # feed TIMG0 WDT once
-  lui   t2, %hi(TIMG_WDTWPROTECT_REG)            # TIMG0 WDT protect register high (lock)
-  addi  t2, t2, %lo(TIMG_WDTWPROTECT_REG)        # add low part
-  li    t3, 0                                    # lock value
-  sw    t3, 0(t2)                                # lock TIMG0 WDT register
-  li    t1, 0x50d83aa1                           # RTC WDT: unlock key value
-  lui   t2, %hi(RTC_CNTL_WDTWPROTECT_REG)        # RTC WDT protect register high
-  addi  t2, t2, %lo(RTC_CNTL_WDTWPROTECT_REG)    # add low part
-  sw    t1, 0(t2)                                # write unlock key
-  lui   t2, %hi(RTC_CNTL_WDTCONFIG0_REG)         # RTC WDT config register high
-  addi  t2, t2, %lo(RTC_CNTL_WDTCONFIG0_REG)     # add low part
-  lw    t3, 0(t2)                                # read current config
-  li    t4, 0xFFFFEFFF                           # mask to clear enable bit
-  and   t3, t3, t4                               # disable RTC WDT
-  sw    t3, 0(t2)                                # write updated config
-  lui   t2, %hi(RTC_CNTL_WDT_FEED_REG)           # RTC WDT feed register high
-  addi  t2, t2, %lo(RTC_CNTL_WDT_FEED_REG)       # add low part
-  li    t3, 1                                    # feed value
-  sw    t3, 0(t2)                                # feed RTC WDT once
-  lui   t2, %hi(RTC_CNTL_WDTWPROTECT_REG)        # RTC WDT protect register high (lock)
-  addi  t2, t2, %lo(RTC_CNTL_WDTWPROTECT_REG)    # add low part
-  li    t3, 0                                    # lock value
-  sw    t3, 0(t2)                                # lock RTC WDT register
-  li    t1, 0x8f1d312a                           # RTC SWD: unlock key value
-  lui   t2, %hi(RTC_CNTL_SWD_WPROTECT_REG)       # RTC SWD protect register high
-  addi  t2, t2, %lo(RTC_CNTL_SWD_WPROTECT_REG)   # add low part
-  sw    t1, 0(t2)                                # write unlock key
-  lui   t2, %hi(RTC_CNTL_SWD_CONF_REG)           # RTC SWD configuration register high
-  addi  t2, t2, %lo(RTC_CNTL_SWD_CONF_REG)       # add low part
-  lw    t3, 0(t2)                                # read current config
-  li    t4, 1<<30                                # mask to disable super watchdog
-  or    t3, t3, t4                               # OR disable bit
-  sw    t3, 0(t2)                                # write updated config
-  lui   t2, %hi(RTC_CNTL_SWD_WPROTECT_REG)       # RTC SWD protect register high (lock)
-  addi  t2, t2, %lo(RTC_CNTL_SWD_WPROTECT_REG)   # add low part
-  li    t3, 0                                    # lock value
-  sw    t3, 0(t2)                                # lock RTC SWD register
-  li    t5, 100                                  # simple post-config delay count
-1:
-  addi  t5, t5, -1                               # decrement delay counter
-  bnez  t5, 1b                                   # loop until zero
-  lui   t1, %hi(APP_ENTRY)                       # load application entry address high
-  addi  t1, t1, %lo(APP_ENTRY)                   # add low part
-  jalr  x0, t1, 0                                # branch to application entry (no return)
-.size Reset_Boot, .-Reset_Boot
+.section .text.init
 
 /**
- * Initialize the .text section. 
- * The .text section contains executable code.
- */
-.section .text
-.align 2
-
-/**
- * @brief   Reset handler for ESP32-C3.
+ * @brief   Reset / startup entry point.
  *
- * @details Provide a simple jump to main.
+ * @details Minimal reset/startup handler used after 2nd stage
+ *          bootloader. This stub sets up the stack, disables the
+ *          watchdogs, and transfers control to the `main` application. 
+ *          It intentionally remains small to minimize boot-time overhead.
  *
  * @param   None
  * @retval  None
  */
-.global Reset_Handler
-.type Reset_Handler, %function
-Reset_Handler:
-  j main                                         # jump to main
-.size Reset_Handler, .-Reset_Handler
+.global _start
+.type _start, %function
+_start:
+  jal   wdt_disable                              # call wtd_disable
+  jal   main                                     # call main
+  j     .                                        # jump infinite loop if main returns
+.size _start, .-_start
+```
+
+# systimer Code 
+```
+/*
+ * FILE: systimer.s
+ *
+ * DESCRIPTION:
+ * ESP32-C3 Systimer Delay Functions.
+ *
+ * AUTHOR: Kevin Thomas
+ * CREATION DATE: November 14, 2025
+ * UPDATE DATE: November 14, 2025
+ */
+
+.include "inc/registers.inc"
+
+/**
+ * Initialize the .text.init section.
+ * The .text.init section contains executable code.
+ */
+.section .text
+
+/**
+ * @brief   Get the current systimer systick value.
+ *
+ * @details Reads the systimer unit 0 value register after updating.
+ *
+ * @param   None
+ * @retval  a0: current systick value
+ */
+.type systimer_systick_get, %function
+systimer_systick_get:
+  li    t0, SYSTIMER_UNIT0_OP_REG                # read UNIT0 value to registers 
+  li    t1, (1<<30)                              # SYSTIMER_TIMER_UNIT0_UPDATE
+  sw    t1, 0(t0)                                # write update to SYSTIMER_UNIT0_OP_REG
+  li    t0, SYSTIMER_UNIT0_VALUE_LO_REG          # UNIT0 value, low 32 bits 
+  lw    a0, 0(t0)                                # load systick value
+  ret                                            # return
+.size systimer_systick_get, .-systimer_systick_get
+
+/**
+ * @brief   Delay for a specified number of systicks.
+ *
+ * @details Implements a busy-wait delay using systimer.
+ *
+ * @param   a0: delay in systicks
+ * @retval  None
+ */
+.type delay_systicks, %function
+delay_systicks:
+  addi  sp, sp, -16                              # allocate stack space
+  sw    ra, 0(sp)                                # save return address
+  sw    s0, 8(sp)                                # save s0 (callee-saved)
+  sw    a0, 4(sp)                                # save delay value
+  jal   systimer_systick_get                     # get current systick
+  mv    s0, a0                                   # store time #1 in s0
+  lw    t1, 4(sp)                                # load delay value
+  add   s0, s0, t1                               # compute expiry = time#1 + delay
+.delay_systicks_delay_loop:
+  jal   systimer_systick_get                     # get current systick
+  blt   a0, s0, .delay_systicks_delay_loop       # loop if not elapsed
+  lw    s0, 8(sp)                                # restore s0
+  lw    ra, 0(sp)                                # restore return address
+  addi  sp, sp, 16                               # deallocate stack space
+  ret                                            # return
+.size delay_systicks, .-delay_systicks
+
+/**
+ * @brief   Delay for a specified number of microseconds.
+ *
+ * @details Converts microseconds to systicks and calls delay_systicks.
+ *
+ * @param   a0: delay in µs
+ * @retval  None
+ */
+.global delay_us
+.type delay_us, %function
+delay_us:
+  addi  sp, sp, -16                              # allocate stack space
+  sw    ra, 0(sp)                                # save return address
+  li    t0, 16                                   # 16MHz clock, 16 ticks per µs
+  mul   a0, a0, t0                               # convert µs to systicks
+  jal   delay_systicks                           # call delay function
+  lw    ra, 0(sp)                                # restore return address
+  addi  sp, sp, 16                               # deallocate stack space
+  ret                                            # return
+.size delay_us, .-delay_us
+
+/**
+ * @brief   Delay for a specified number of milliseconds.
+ *
+ * @details Converts milliseconds to systicks and calls delay_systicks.
+ *
+ * @param   a0: delay in ms
+ * @retval  None
+ */
+.global delay_ms
+.type delay_ms, %function
+delay_ms:
+  addi  sp, sp, -16                              # allocate stack space
+  sw    ra, 0(sp)                                # save return address
+  li    t0, 16000                                # 16MHz clock, 16000 ticks per ms
+  mul   a0, a0, t0                               # convert µs to systicks
+  jal   delay_systicks                           # call delay function
+  lw    ra, 0(sp)                                # restore return address
+  addi  sp, sp, 16                               # deallocate stack space
+  ret                                            # return
+.size delay_ms, .-delay_ms
+```
+
+# wdt Code
+```
+/*
+ * FILE: wdt.s
+ *
+ * DESCRIPTION:
+ * ESP32-C3 Bare-Metal Watchdog Timer Utilities.
+ *
+ * AUTHOR: Kevin Thomas
+ * CREATION DATE: November 15, 2025
+ * UPDATE DATE: November 15, 2025
+ */
+
+.include "inc/registers.inc"
+
+.equ WDT_WRITE_PROTECT, 0x50D83AA1
+.equ SWD_WRITE_PROTECT, 0x8F1D312A
+
+/**
+ * Initialize the .text.init section.
+ * The .text.init section contains executable code.
+ */
+.section .text
+
+/**
+ * @brief   Feed the watchdog timer.
+ *
+ * @param   None
+ * @retval  None
+ */
+.type wdt_feed, %function
+wdt_feed:
+  li    t0, TIMG0_WDTFEED_REG                    # load wdt feed register address
+  addi  t1, t1, 1                                # increment feed counter
+  sw    t1, 0(t0)                                # write feed value
+  ret                                            # return
+.size wdt_feed, .-wdt_feed
+
+/**
+ * @brief   Disable all watchdog timers.
+ *
+ * @param   None
+ * @retval  None
+ */
+.global wdt_disable
+.type wdt_disable, %function
+wdt_disable:
+  li    t0, TIMG0_WDTWPROTECT_REG                # timg0 write protect register
+  li    t1, WDT_WRITE_PROTECT                    # load write protect key
+  sw    t1, (t0)                                 # unlock write protection
+  li    t0, TIMG0_WDTCONFIG0_REG                 # timg0 config register
+  li    t1, 0                                    # load disable value
+  sw    t1, (t0)                                 # disable timg0 watchdog
+  li    t0, TIMG1_WDTWPROTECT_REG                # timg1 write protect register
+  li    t1, WDT_WRITE_PROTECT                    # load write protect key
+  sw    t1, (t0)                                 # unlock write protection
+  li    t0, TIMG1_WDTCONFIG0_REG                 # timg1 config register
+  li    t1, 0                                    # load disable value
+  sw    t1, (t0)                                 # disable timg1 watchdog
+  li    t0, RTC_CNTL_WDTWPROTECT_REG             # rtc write protect register
+  li    t1, WDT_WRITE_PROTECT                    # load write protect key
+  sw    t1, (t0)                                 # unlock write protection
+  li    t0, RTC_CNTL_WDTCONFIG0_REG              # rtc config register
+  li    t1, 0                                    # load disable value
+  sw    t1, (t0)                                 # disable rtc watchdog
+  li    t0, RTC_CNTL_SWD_WPROTECT_REG            # swd write protect register
+  li    t1, SWD_WRITE_PROTECT                    # load write protect key
+  sw    t1, (t0)                                 # unlock write protection
+  li    t0, RTC_CNTL_SWD_CONF_REG                # swd config register
+  li    t1, ((1<<31) | 0x4B00000)                # enable with auto feed
+  sw    t1, (t0)                                 # write swd config
+  ret                                            # return
+.size wdt_disable, .-wdt_disable
+```
+
+# main Code 
+```
+/*
+ * FILE: main.s
+ *
+ * DESCRIPTION:
+ * ESP32-C3 Bare-Metal GPIO0 Blink Example.
+ *
+ * AUTHOR: Kevin Thomas
+ * CREATION DATE: November 14, 2025
+ * UPDATE DATE: November 14, 2025
+ */
+
+.include "inc/registers.inc"
+
+/**
+ * Initialize the .text.init section.
+ * The .text.init section contains executable code.
+ */
+.section .text
 
 /**
  * @brief   Main application entry point.
@@ -156,90 +270,15 @@ Reset_Handler:
 .global main
 .type main, %function
 main:
-  li    t6, 1                                    # load 1
-  sll   t6, t6, 8                                # shift left 8 → GPIO8 bit mask
-  lui   t2, %hi(GPIO_ENABLE_W1TS_REG)            # GPIO enable set register high
-  addi  t2, t2, %lo(GPIO_ENABLE_W1TS_REG)        # add low part
-  sw    t6, 0(t2)                                # enable GPIO8 output
-  j     Loop                                     # jump to blink loop
+  li    a0, 0                                    # pin number 0
+  jal   gpio_output_enable                       # call gpio_output_enable
+.loop:
+  li    a0, 0                                    # pin number 0
+  jal   gpio_toggle                              # call gpio_toggle
+  li    a0, 500                                  # 500 ms delay
+  jal   delay_ms                                 # call delay_ms
+  j     .loop									                   # jump to .loop
 .size main, .-main
-
-/**
- * @brief   Delay_MS.
- *
- * @details
- *   Provides a simple busy‑loop delay routine:
- *   - Input in a0 = number of milliseconds
- *   - Each millisecond ≈ 5000 loop iterations (empirically calibrated for ESP32‑C3 @ 80 MHz)
- *   - Returns when the requested time has elapsed
- *
- * @param   a0 - milliseconds
- * @retval  None
- */
-.global Delay_MS
-.type Delay_MS, %function
-Delay_MS:
-.Delay_MS_Check:
-  blez  a0, .Delay_MS_Done                       # if ms <= 0, skip delay
-.Delay_MS_Setup:
-  li    t1, 5000                                 # loops per ms (empirical constant)
-  mul   t1, a0, t1                               # total loop count = ms * 5000
-.Delay_MS_Loop:
-  addi  t1, t1, -1                               # decrement loop counter
-  bnez  t1, .Delay_MS_Loop                       # branch until zero
-.Delay_MS_Done:
-  ret                                            # return to caller
-.size Delay_MS, .-Delay_MS
-
-/**
- * @brief   Loop routine to blink GPIO8 at ~1 Hz.
- *
- * @details
- *   Provides a simple LED blink routine on GPIO8:
- *   - Sets GPIO8 high for ~500 ms
- *   - Sets GPIO8 low for ~500 ms
- *   - Loops indefinitely
- *
- * @param   None
- * @retval  None
- */
-.global Loop
-.type Loop, %function
-Loop:
-.Loop_Setup:
-  li    t0, 1                                    # load 1
-  sll   t0, t0, 8                                # shift left 8 → GPIO8 bit mask
-  lui   t2, %hi(GPIO_BASE)                       # GPIO base high part
-  addi  t2, t2, %lo(GPIO_BASE)                   # add low part → t2 = GPIO base
-  lui   t3, %hi(GPIO_OUT_W1TS_REG)               # GPIO_OUT_W1TS_REG high part
-  addi  t3, t3, %lo(GPIO_OUT_W1TS_REG)           # add low part → t3 = GPIO_OUT_W1TS_REG
-.Loop_On:
-  sw    t0, GPIO_OUT_W1TS_REG - GPIO_BASE(t2)    # set GPIO8 high (LED on)
-  li    a0, 500                                  # 500 ms
-  jal   ra, Delay_MS                             # call delay
-  sw    t0, GPIO_OUT_W1TC_REG - GPIO_BASE(t2)    # clear GPIO8 low (LED off)
-  li    a0, 500                                  # 500 ms
-  jal   ra, Delay_MS                             # call delay
-  j     .Loop_On                                 # repeat forever
-.size Loop, .-Loop
-
-/**
- * Test data and constants.
- * The .rodata section is used for constants and static data.
- */
-.section .rodata                                 # read-only data section
-
-/**
- * Initialized global data.
- * The .data section is used for initialized global or static variables.
- */
-.section .data                                   # data section
-
-/**
- * Uninitialized global data.
- * The .bss section is used for uninitialized global or static variables.
- */
-.section .bss                                    # BSS section
 ```
 
 <br>
