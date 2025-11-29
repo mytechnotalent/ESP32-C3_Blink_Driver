@@ -35,5 +35,5 @@ main:
   jal   gpio_toggle                              # call gpio_toggle
   li    a0, 500                                  # 500 ms delay
   jal   delay_ms                                 # call delay_ms
-  j     .loop									                   # jump to .loop
+  j     .loop                                    # jump to .loop
 .size main, .-main
